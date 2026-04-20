@@ -3,40 +3,68 @@ import bcrypt from "bcryptjs"
 import User from "../models/User.js"
 import Office from "../models/Office.js"
 
-/* LOGIN ADMIN (WEB) */
+/* ─────────────────────────────
+   LOGIN ADMIN (FIX + DEBUG)
+───────────────────────────── */
 export const loginAdmin = async (req, res) => {
   try {
     const { email, password, slug } = req.body
 
-    console.log("📥 LOGIN:", { email, slug })
+    console.log("📥 LOGIN ADMIN REQUEST")
+    console.log("EMAIL:", email)
+    console.log("SLUG:", slug)
 
-    const user = await User.findOne({ email })
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email y password requeridos" })
+    }
+
+    let user = null
+
+    // 🔹 Buscar usuario
+    if (slug) {
+      const office = await Office.findOne({ slug })
+
+      console.log("🏢 OFFICE:", office)
+
+      if (!office) {
+        return res.status(404).json({ message: "Oficina no encontrada" })
+      }
+
+      user = await User.findOne({ email, officeId: office._id })
+    } else {
+      user = await User.findOne({ email })
+    }
+
+    console.log("👤 USER ENCONTRADO:", user)
 
     if (!user) {
-      console.log("❌ Usuario no existe")
       return res.status(401).json({ message: "Credenciales incorrectas" })
     }
 
-    // 🔥 FIX: normalizar rol
+    // 🔹 Validar rol
     const rol = user.rol?.trim()?.toUpperCase()
+    console.log("🔒 ROL BD:", rol)
 
     if (rol !== "ADMIN") {
-      console.log("❌ Rol inválido:", user.rol)
       return res.status(403).json({ message: "No autorizado" })
     }
 
+    // 🔐 Validar password
     const isValid = await bcrypt.compare(password, user.password)
 
-    console.log("🔐 MATCH:", isValid)
+    console.log("🔑 PASSWORD INGRESADA:", password)
+    console.log("🔐 HASH BD:", user.password)
+    console.log("✅ MATCH:", isValid)
 
     if (!isValid) {
       return res.status(401).json({ message: "Credenciales incorrectas" })
     }
 
+    // 🔥 Token
     const token = jwt.sign(
       {
         userId: user._id,
-        rol: "ADMIN",
+        rol: user.rol,
         officeId: user.officeId
       },
       process.env.JWT_SECRET,
@@ -48,18 +76,20 @@ export const loginAdmin = async (req, res) => {
       user: {
         id: user._id,
         email: user.email,
-        rol: "ADMIN"
+        rol: user.rol
       }
     })
 
   } catch (error) {
-    console.error("🔥 ERROR LOGIN ADMIN:", error)
+    console.error("❌ ERROR LOGIN ADMIN:", error)
     return res.status(500).json({ message: "Error en login admin" })
   }
 }
 
 
-/* LOGIN COBRADOR (MOBILE) */
+/* ─────────────────────────────
+   LOGIN COBRADOR
+───────────────────────────── */
 export const loginCobrador = async (req, res) => {
   try {
     const { email, password, slug } = req.body
@@ -98,19 +128,18 @@ export const loginCobrador = async (req, res) => {
       { expiresIn: "8h" }
     )
 
-    res.json({
-      token,
-      user
-    })
+    return res.json({ token, user })
 
   } catch (error) {
     console.error("❌ ERROR LOGIN COBRADOR:", error)
-    res.status(500).json({ message: "Error en login cobrador" })
+    return res.status(500).json({ message: "Error en login cobrador" })
   }
 }
 
 
-/* LOGIN SUPERADMIN */
+/* ─────────────────────────────
+   LOGIN SUPERADMIN
+───────────────────────────── */
 export const loginSuperAdmin = async (req, res) => {
   try {
     const { email, password } = req.body
@@ -133,13 +162,10 @@ export const loginSuperAdmin = async (req, res) => {
       { expiresIn: "12h" }
     )
 
-    res.json({
-      token,
-      user
-    })
+    return res.json({ token, user })
 
   } catch (error) {
     console.error("❌ ERROR LOGIN SUPERADMIN:", error)
-    res.status(500).json({ message: "Error en login superadmin" })
+    return res.status(500).json({ message: "Error en login superadmin" })
   }
 }
