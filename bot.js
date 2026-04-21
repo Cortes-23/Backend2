@@ -4,11 +4,18 @@ import dotenv from "dotenv"
 
 dotenv.config()
 
+// 🔐 TOKEN
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, {
   polling: true
 })
 
-const API = process.env.API_URL || "http://localhost:3000"
+// 🌐 API (OBLIGATORIO)
+const API = process.env.API_URL
+
+if (!API) {
+  console.error("❌ API_URL no está definida en .env")
+  process.exit(1)
+}
 
 // 🧠 Estados y sesiones
 const userState = {}
@@ -30,21 +37,20 @@ function menu(chatId) {
   })
 }
 
-// 🔹 COMANDOS
+// 🔹 INICIO
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, "Bienvenido al sistema de cobranzas 💰")
   menu(msg.chat.id)
 })
 
-bot.onText(/\/menu/, (msg) => menu(msg.chat.id))
-
+// 🔹 CANCELAR
 bot.onText(/\/cancelar/, (msg) => {
   delete userState[msg.chat.id]
   bot.sendMessage(msg.chat.id, "❌ Operación cancelada")
   menu(msg.chat.id)
 })
 
-// 🔒 PROTECCIÓN GLOBAL
+// 🔒 ACCIONES QUE REQUIEREN LOGIN
 const accionesProtegidas = [
   "👤 Crear cliente",
   "📋 Ver clientes",
@@ -84,7 +90,7 @@ bot.on("message", async (msg) => {
 
   if (state?.step === "login_password") {
     try {
-      const res = await axios.post(`${API}/api/auth/login`, {
+      const res = await axios.post(`${API}/api/auth/login-cobrador`, {
         email: state.email,
         password: text
       })
@@ -94,9 +100,11 @@ bot.on("message", async (msg) => {
         user: res.data.user
       }
 
+      console.log("✅ LOGIN OK:", res.data.user)
+
       bot.sendMessage(chatId, "✅ Sesión iniciada correctamente")
     } catch (error) {
-      console.log(error.response?.data || error.message)
+      console.log("❌ ERROR LOGIN:", error.response?.data || error.message)
       bot.sendMessage(chatId, "❌ Credenciales incorrectas")
     }
 
@@ -151,6 +159,7 @@ bot.on("message", async (msg) => {
 
       bot.sendMessage(chatId, "✅ Cliente creado")
     } catch (error) {
+      console.log("❌ ERROR CLIENTE:", error.response?.data)
       bot.sendMessage(chatId, "❌ Error al crear cliente")
     }
 
@@ -181,13 +190,14 @@ bot.on("message", async (msg) => {
       })
 
       bot.sendMessage(chatId, msg)
-    } catch {
+    } catch (error) {
+      console.log("❌ ERROR LISTAR:", error.response?.data)
       bot.sendMessage(chatId, "❌ Error al consultar")
     }
   }
 
   // ========================
-  // 💰 CREAR PRÉSTAMO (20%)
+  // 💰 CREAR PRÉSTAMO
   // ========================
   if (text === "💰 Crear préstamo") {
     userState[chatId] = { step: "prestamo_cliente" }
@@ -216,7 +226,7 @@ bot.on("message", async (msg) => {
 
     return bot.sendMessage(
       chatId,
-      `💰 Monto: ${monto}\n📈 Interés: ${interes}\n📊 Total: ${total}\n\nEscribe SI`
+      `💰 Monto: ${monto}\n📈 Interés: ${interes}\n📊 Total: ${total}\n\nEscribe SI para confirmar`
     )
   }
 
@@ -245,110 +255,15 @@ bot.on("message", async (msg) => {
       )
 
       bot.sendMessage(chatId, "✅ Préstamo creado")
-    } catch {
-      bot.sendMessage(chatId, "❌ Error préstamo")
+    } catch (error) {
+      console.log("❌ ERROR PRESTAMO:", error.response?.data)
+      bot.sendMessage(chatId, "❌ Error al crear préstamo")
     }
 
     delete userState[chatId]
     return menu(chatId)
   }
 
-  // ========================
-  // 📊 VER DEUDAS
-  // ========================
-  if (text === "📊 Ver deudas") {
-    const session = userSessions[chatId]
-
-    try {
-      const res = await axios.get(`${API}/api/creditos`, {
-        headers: {
-          Authorization: `Bearer ${session.token}`
-        }
-      })
-
-      let msg = "📊 Deudas:\n\n"
-
-      res.data.forEach((c) => {
-        msg += `👤 ${c.cliente}\n💰 ${c.total}\n📉 ${c.saldo}\n\n`
-      })
-
-      bot.sendMessage(chatId, msg)
-    } catch {
-      bot.sendMessage(chatId, "❌ Error")
-    }
-  }
-
-  // ========================
-  // 💵 PAGAR CUOTA
-  // ========================
-  if (text === "💵 Pagar cuota") {
-    userState[chatId] = { step: "pago_id" }
-    return bot.sendMessage(chatId, "🆔 ID crédito:")
-  }
-
-  if (state?.step === "pago_id") {
-    state.credito = text
-    state.step = "pago_valor"
-    return bot.sendMessage(chatId, "💰 Valor a pagar:")
-  }
-
-  if (state?.step === "pago_valor") {
-    const session = userSessions[chatId]
-
-    try {
-      await axios.post(
-        `${API}/api/creditos/pagar`,
-        {
-          creditoId: state.credito,
-          valor: text
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${session.token}`
-          }
-        }
-      )
-
-      bot.sendMessage(chatId, "✅ Pago registrado")
-    } catch {
-      bot.sendMessage(chatId, "❌ Error en pago")
-    }
-
-    delete userState[chatId]
-    return menu(chatId)
-  }
-
-  // ========================
-  // 📉 VER SALDO
-  // ========================
-  if (text === "📉 Ver saldo") {
-    userState[chatId] = { step: "saldo_id" }
-    return bot.sendMessage(chatId, "🆔 ID crédito:")
-  }
-
-  if (state?.step === "saldo_id") {
-    const session = userSessions[chatId]
-
-    try {
-      const res = await axios.get(`${API}/api/creditos/${text}`, {
-        headers: {
-          Authorization: `Bearer ${session.token}`
-        }
-      })
-
-      const c = res.data
-
-      bot.sendMessage(
-        chatId,
-        `📊 Total: ${c.total}\n📉 Saldo: ${c.saldo}`
-      )
-    } catch {
-      bot.sendMessage(chatId, "❌ No encontrado")
-    }
-
-    delete userState[chatId]
-    return menu(chatId)
-  }
 })
 
-console.log("🤖 Bot listo y funcionando...")
+console.log("🤖 Bot listo y conectado a:", API)
